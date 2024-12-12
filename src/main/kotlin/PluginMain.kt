@@ -8,6 +8,7 @@ import net.mamoe.mirai.event.globalEventChannel
 import config.LzConfig
 import net.mamoe.mirai.utils.MiraiLogger
 import org.huvz.mirai.plugin.Service.ImageService
+import org.huvz.mirai.plugin.Service.ImageService.queryDataToMap
 import org.huvz.mirai.plugin.command.BaseEvent
 
 
@@ -15,7 +16,7 @@ object PluginMain : KotlinPlugin(
     JvmPluginDescription(
         id = "org.huvz.laizhi",
         name = "LaiZhiXX",
-        version = "0.4.0"
+        version = "0.5.0"
     ) {
         author("Huvz")
         info(
@@ -27,12 +28,15 @@ object PluginMain : KotlinPlugin(
     }
 ) {
 
-
+    var DataMP: HashMap<String, HashSet<String>> = hashMapOf()
     override fun onEnable() {
 
         LzConfig.reload()
         ImageService.initDatabase()
-
+        logger.info("数据库加载成功，执行脏数据清理中....")
+        var n  =ImageService.deleteUnsafeFiles()
+        logger.info("本次清理掉$n 条脏数据")
+        DataMP = queryDataToMap();
         globalEventChannel().registerListenerHost(BaseEvent)
         logger.info("Plugin loaded" )
         //        CommandManager.registerCommand(List2Image)

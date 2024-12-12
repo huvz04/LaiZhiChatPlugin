@@ -7,6 +7,7 @@ import config.LzConfig.Graphicslist
 import config.LzConfig.enablelist
 import entity.LZException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.time.withTimeoutOrNull
 import net.mamoe.mirai.console.command.CommandSender
@@ -25,7 +26,9 @@ import net.mamoe.mirai.message.data.Image.Key.queryUrl
 import net.mamoe.mirai.utils.ExternalResource.Companion.uploadAsImage
 import okhttp3.Request
 import org.huvz.mirai.plugin.PluginMain
+import org.huvz.mirai.plugin.PluginMain.DataMP
 import org.huvz.mirai.plugin.Service.ImageService
+import org.huvz.mirai.plugin.Service.ImageService.getGroup
 import org.huvz.mirai.plugin.Service.ImageService.setKey
 import org.huvz.mirai.plugin.entity.GroupDetail
 import org.huvz.mirai.plugin.entity.ImageFile
@@ -51,9 +54,10 @@ object BaseEvent : SimpleListenerHost() {
     suspend fun GroupMessageEvent.onMessage(): ListeningStatus {
         val msg = message.content;
         val urlname: String?
+
+
         val keyword = enablelist.firstOrNull() { msg.equals(it) }
         when (msg) {
-
             keyword -> setKeyWord()
             else -> {
                 //add
@@ -61,8 +65,8 @@ object BaseEvent : SimpleListenerHost() {
                 //get
                 val Gprefix = GetcommandList.firstOrNull() { msg.startsWith(it) }
                 //list
-                val gapfix =Graphicslist.firstOrNull() { msg.equals(it) }
-                if (Aprefix!=null) {
+                val gapfix = Graphicslist.firstOrNull() { msg.equals(it) }
+                if (Aprefix != null) {
                     val urlname = msg.drop(Aprefix.length).trim()
                     val ck = isPathSafe(urlname)
                     if (ck) {
@@ -70,8 +74,25 @@ object BaseEvent : SimpleListenerHost() {
                     } else {
                         sendMessage(group, "非法名字！")
                     }
-                }
-                else if (Gprefix!=null) {
+                } else if (gapfix != null) {
+                    getlist(sender);
+                } else if (getGroup(this.group.id.toString()).key == "1") {
+                    val list = DataMP[this.group.id.toString()]
+//                    if (list?.size == 0) return ListeningStatus.LISTENING
+                    var firstMatched: String? = null
+                    if (list != null) {
+                        for (item in list) {
+                            if (msg.contains(item)) {
+                                firstMatched = item
+                                break
+                            }
+                        }
+                    }
+                    if (firstMatched != null && msg.indexOf(firstMatched)!=-1) {
+//                        PluginMain.logger.info("获取图片${firstMatched}")
+                        getImg(firstMatched, -1)
+                    }
+                } else if (Gprefix != null) {
                     // -1 随机
                     var getnum = -1
                     val strlist = msg.split(" ")
@@ -93,18 +114,19 @@ object BaseEvent : SimpleListenerHost() {
                     }
                     getImg(urlname, getnum)
                 }
-                else if(gapfix!=null){
-                    getlist(sender);
-                }
             }
+
         }
+
         return ListeningStatus.LISTENING
     }
-    private suspend fun GroupMessageEvent.setKeyWord(){
+
+    private suspend fun GroupMessageEvent.setKeyWord() {
         var res = setKey(group.id.toString());
-        if(res) sendMessage(group,"当前模式：关键字匹配")
-        else sendMessage(group,"当前模式：来只匹配")
+        if (res) sendMessage(group, "当前模式：关键字匹配")
+        else sendMessage(group, "当前模式：来只匹配")
     }
+
     /**
      * 获取图片
      */
@@ -118,6 +140,7 @@ object BaseEvent : SimpleListenerHost() {
                     sendMessage(group, img);
                 }
             } else {
+//                res?.closed
                 sendMessage(group, "目录下找不到图片噢")
             }
         }
@@ -146,7 +169,8 @@ object BaseEvent : SimpleListenerHost() {
     @OptIn(ExperimentalCoroutinesApi::class)
     private suspend fun GroupMessageEvent.Lzsave(arg: String?, sender1: Member) {
         SendTask.sendMessage(group, At(sender1) + "请在30s内发送一张图片")
-        val duration = Duration.ofMillis(3000)
+        val duration = Duration.ofMillis(30000)
+        var isImageSaved = false;
         withTimeoutOrNull(duration) {
             suspendCancellableCoroutine { continuation ->
                 val listener = globalEventChannel().subscribeAlways<GroupMessageEvent> {
@@ -171,31 +195,34 @@ object BaseEvent : SimpleListenerHost() {
                             val imageByte = response.body!!.bytes()
                             arg?.let { it1 -> ImageService.saveImage(this.subject.id, it1, imageByte, fileType) }
                             sendMessage(group, chain + PlainText("保存成功噢"));
+                            isImageSaved = true;
                         } catch (e: LZException) {
                             sendMessage(group, "该图库已存在相同图片哦")
+                            isImageSaved = true;
                         }
-                        continuation.resume(Unit) {}
                     }
                 }
-                continuation.invokeOnCancellation {
-                    listener.complete()
-                }
+                continuation.resume(Unit) {}
             }
         } ?: run {
-            sendMessage(group, At(sender1) + "已超时，请重新发送图片")
+            if (!isImageSaved) {
+                sendMessage(group, At(sender1) + "已超时，请重新发送图片")
+            }
+
         }
+
     }
 
     /**
      * 获取图库
      */
-    suspend fun GroupMessageEvent.getlist(sender: Member){
+    suspend fun GroupMessageEvent.getlist(sender: Member) {
         val request = Request.Builder()
-                .url(sender.group.avatarUrl)
-                .build()
+            .url(sender.group.avatarUrl)
+            .build()
         val reponse = request?.let { HttpClient.okHttpClient.newCall(it).execute() }
         val imageByte = reponse?.body!!.bytes()
-        val list : List<ImageFile> = ImageService.selectImageDetail(sender.group.id)
+        val list: List<ImageFile> = ImageService.selectImageDetail(sender.group.id)
         val groupDetail = GroupDetail(
             sender.id.toString(),
             imageByte,
@@ -204,22 +231,22 @@ object BaseEvent : SimpleListenerHost() {
             list.size,
             sender.group.members.size
         );
-        val newMap:HashMap<String,ArrayList<ImageFile>> = hashMapOf()
-        for(i in list){
-            var list2 : ArrayList<ImageFile> = arrayListOf()
-            try{
-                if(newMap[i.about] !=null) {
+        val newMap: HashMap<String, ArrayList<ImageFile>> = hashMapOf()
+        for (i in list) {
+            var list2: ArrayList<ImageFile> = arrayListOf()
+            try {
+                if (newMap[i.about] != null) {
                     list2 = newMap[i.about]!!
                 }
                 list2.add(i)
                 newMap[i.about] = list2
-            }catch (_:Exception){
+            } catch (_: Exception) {
                 PluginMain.logger.error("读取图片错误:i.url+\\${i.md5}.${i.type}....自动移除脏数据")
                 ImageService.deleteImage(i.id);
             }
         }
         val composer = ImageDrawerComposer(
-            1430, (newMap.size/6+1)*(185+40)+200,
+            1430, (newMap.size / 6 + 1) * (185 + 40) + 200,
             "titleText", newMap, 6,
             groupDetail,
             40f,
@@ -232,9 +259,8 @@ object BaseEvent : SimpleListenerHost() {
                 val img = res.uploadAsImage(it)
                 sendMessage(group, img);
             }
-        }catch (e:Exception)
-        {
-            sendMessage(this.subject,"图片发送失败呜呜\n异常:${e.message}")
+        } catch (e: Exception) {
+            sendMessage(this.subject, "图片发送失败呜呜\n异常:${e.message}")
         }
     }
 
@@ -247,12 +273,12 @@ object BaseEvent : SimpleListenerHost() {
                 .replace("/./", "/")
                 .replace("\\.\\", "\\")
 
-            return normalizedName.matches(Regex("^[a-zA-Z0-9\u4e00-\u9fa5]+\\.[a-zA-Z0-9]+$"))
+            return normalizedName.matches(Regex("^[a-zA-Z0-9\u4e00-\u9fa5]+$"))
                 && !normalizedName.contains("..")
                 && !normalizedName.contains(":")
                 && !normalizedName.startsWith("/")
                 && !normalizedName.startsWith("\\")
-        } catch (e: IOException) {
+        } catch (e: Exception) {
             return false
         }
     }

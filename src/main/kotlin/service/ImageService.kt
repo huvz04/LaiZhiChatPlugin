@@ -10,12 +10,18 @@ import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.huvz.mirai.plugin.PluginMain
+import org.huvz.mirai.plugin.PluginMain.DataMP
 import org.huvz.mirai.plugin.entity.GroupDetail
 import org.huvz.mirai.plugin.entity.ImageFile
 import java.io.File
 import java.math.BigInteger
 import java.security.MessageDigest
 import org.huvz.mirai.plugin.PluginMain.resolveDataFile
+import util.IdWorker
+import java.io.OutputStream
+import java.nio.file.Files
+import java.nio.file.StandardOpenOption
+import kotlin.io.path.Path
 
 object ImageService {
     //    private val db = Database.connect(
@@ -41,22 +47,15 @@ object ImageService {
      * @return 成功码
      */
 
-    fun selectGroupDetail(id: Int): GroupDetail {
-        return transaction(db) {
-            GroupDetails.selectAll().where { GroupDetails.id eq id.toString() }
-                .map {
-                    GroupDetail(
-                        it[GroupDetails.id],
-                        it[GroupDetails.avatar],
-                        it[GroupDetails.key],
-                        it[GroupDetails.name],
-                        it[GroupDetails.total],
-                        it[GroupDetails.galleryNumber]
-                    )
-                }
-                .firstOrNull() ?: throw IllegalArgumentException("Group with ID $id not found")
-        }
-    }
+//    fun selectGroupDetail(id: Int): GroupDetail {
+//        return transaction(db) {
+//            GroupDetails.selectAll().where { GroupDetails.id eq id.toString() }
+//                .map {
+//                    GroupDetail()
+//                }
+//                .firstOrNull() ?: throw IllegalArgumentException("Group with ID $id not found")
+//        }
+//    }
 
 
     /**
@@ -97,7 +96,28 @@ object ImageService {
         }
         return 1
     }
-
+    //校验脏数据
+    fun deleteUnsafeFiles(): Int {
+        var deletedCount = 0
+        return transaction {
+            ImageFiles.selectAll().where { ImageFiles.about.like("%/%") }.forEach { result ->
+                val aboutValue = result[ImageFiles.about]
+                val urlValue = result[ImageFiles.url]
+                if (!isPathSafe(aboutValue)) {
+                    ImageFiles.deleteWhere { ImageFiles.about eq aboutValue }
+                    deletedCount++
+                } else {
+                    val file = resolveDataFile(urlValue)
+                    if (!file.exists() || file.length() == 0L) {
+                        file.delete()
+                        ImageFiles.deleteWhere { ImageFiles.url eq urlValue }
+                        deletedCount++
+                    }
+                }
+            }
+            deletedCount // 返回删除的数据量
+        }
+    }
     /**
      * 获取文件后缀
      *
@@ -137,16 +157,16 @@ object ImageService {
     /**
      * 更新qq群图库信息
      */
-    fun updateGroupDetail(qq: Long) {
-        transaction(db) {
-            val entity = selectImageDetail(qq)
-            val entity2 = selectGroupDetail(qq.toInt())
-            entity2.total = entity.size
-            GroupDetails.update({ GroupDetails.id eq entity2.id }) {
-                it[total] = entity2.total
-            }
-        }
-    }
+//    fun updateGroupDetail(qq: Long) {
+//        transaction(db) {
+//            val entity = selectImageDetail(qq)
+//            val entity2 = selectGroupDetail(qq.toInt())
+//            entity2.total = entity.size
+////            GroupDetails.update({ GroupDetails.id eq entity2.id }) {
+////                it[total] = entity2.total
+////            }
+//        }
+//    }
 
     /**
      * 获取图片
@@ -203,13 +223,14 @@ object ImageService {
      */
     suspend fun saveImage(q1: Long, name: String, imageByte: ByteArray, fileType: String) {
         val ParentfilePath = "LaiZhi/$q1/$name/"
-        val fileParent = PluginMain.resolveDataFile(ParentfilePath)
+        val fileParent = resolveDataFile(ParentfilePath)
         if (!fileParent.exists()) fileParent.mkdirs()
 
         val md5a = getMD5(imageByte)
-        val filePath = ParentfilePath + "${md5a}.${fileType}"
-        val file = PluginMain.resolveDataFile(filePath)
-        file.writeBytes(imageByte)
+        val filePath = File(fileParent, "$md5a.$fileType")
+        filePath.writeBytes(imageByte)
+//        val file = resolveDataFile(filePath)
+//        file.writeBytes(imageByte)
         transaction(db) {
             val entity = ImageFiles.selectAll()
                 .where {
@@ -220,6 +241,7 @@ object ImageService {
                 .firstOrNull()
             if (entity != null) throw LZException("该图库已存在相同的图片")
             ImageFiles.insert {
+                it[id] = IdWorker().nextId()
                 it[md5] = md5a.toString()
                 it[qq] = q1.toString()
                 it[count] = 0L
@@ -227,6 +249,7 @@ object ImageService {
                 it[type] = fileType
                 it[url] = ParentfilePath
             }
+            updateMapAfterInsert( q1.toString(), name)
         }
     }
 
@@ -304,7 +327,41 @@ object ImageService {
             k1=="0"
         }
     }
-    fun close() {
+    fun updateMapAfterInsert(qqid: String, name: String) {
+        synchronized(DataMP) {
+            if (DataMP.containsKey(qqid)) {
+                DataMP[qqid]!!.add(name)
+            } else {
+                DataMP[qqid] = hashSetOf(name)
+            }
+        }
+    }
+    fun queryDataToMap(): HashMap<String, HashSet<String>> {
+        val dataMap = HashMap<String, HashSet<String>>()
+        transaction {
+            ImageFiles.selectAll().forEach { row ->
+                val qqid = row[ImageFiles.qq]
+                val name = row[ImageFiles.about]
+                if (dataMap.containsKey(qqid)) {
+                    dataMap[qqid]!!.add(name)
+                } else {
+                    dataMap[qqid] = hashSetOf(name)
+                }
+            }
+        }
+        return dataMap
+    }
+    fun isPathSafe(fileName: String): Boolean {
+        val normalizedName = fileName
+            .replace("./", "")
+            .replace(".\\", "")
+            .replace("/./", "/")
+            .replace("\\.\\", "\\")
 
+        return normalizedName.matches(Regex("^[a-zA-Z0-9\u4e00-\u9fa5]+$"))
+            && !normalizedName.contains("..")
+            && !normalizedName.contains(":")
+            && !normalizedName.startsWith("/")
+            && !normalizedName.startsWith("\\")
     }
 }
