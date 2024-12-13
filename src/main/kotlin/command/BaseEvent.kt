@@ -47,7 +47,7 @@ object BaseEvent : SimpleListenerHost() {
     override fun handleException(context: CoroutineContext, exception: Throwable) {
         PluginMain.logger.error("未知错误")
     }
-
+    val  blacklist: List<String> = listOf("图片","image","url");
     var isKey: Boolean = false;
 
     @EventHandler
@@ -71,49 +71,60 @@ object BaseEvent : SimpleListenerHost() {
                     val ck = isPathSafe(urlname)
                     if (ck) {
                         Lzsave(urlname, sender)
+                        return ListeningStatus.LISTENING
                     } else {
                         sendMessage(group, "非法名字！")
                     }
                 } else if (gapfix != null) {
                     getlist(sender);
-                } else if (getGroup(this.group.id.toString()).key == "1") {
-                    val list = DataMP[this.group.id.toString()]
+                    return ListeningStatus.LISTENING
+                }
+                else if(blacklist.contains(msg)){
+                    sendMessage(group, "黑名单图库")
+                }
+                else{
+                    if (getGroup(this.group.id.toString()).key == "1") {
+                        val list = DataMP[this.group.id.toString()]
 //                    if (list?.size == 0) return ListeningStatus.LISTENING
-                    var firstMatched: String? = null
-                    if (list != null) {
-                        for (item in list) {
-                            if (msg.contains(item)) {
-                                firstMatched = item
-                                break
+                        var firstMatched: String? = null
+                        if (list != null) {
+                            for (item in list) {
+                                if (msg.contains(item)) {
+                                    firstMatched = item
+                                    break
+                                }
                             }
                         }
-                    }
-                    if (firstMatched != null && msg.indexOf(firstMatched)!=-1) {
+                        if (firstMatched != null && msg.indexOf(firstMatched)!=-1) {
 //                        PluginMain.logger.info("获取图片${firstMatched}")
-                        getImg(firstMatched, -1)
-                    }
-                } else if (Gprefix != null) {
-                    // -1 随机
-                    var getnum = -1
-                    val strlist = msg.split(" ")
-                    var urlname = if (strlist.isNotEmpty()) {
-                        if (strlist[0].length > 2) {
-                            strlist[0].drop(2)
+                            getImg(firstMatched, -1)
+                        }
+                        return ListeningStatus.LISTENING
+                    } else if (Gprefix != null) {
+                        // -1 随机
+                        var getnum = -1
+                        val strlist = msg.split(" ")
+                        var urlname = if (strlist.isNotEmpty()) {
+                            if (strlist[0].length > 2) {
+                                strlist[0].drop(2)
+                            } else {
+                                strlist[1].trim()
+                            }
                         } else {
-                            strlist[1].trim()
+                            msg.drop(Gprefix.length).trim()
                         }
-                    } else {
-                        msg.drop(Gprefix.length).trim()
-                    }
-                    if (strlist.size == 2 || (strlist.size == 3 && strlist[0].length > 2)) {
-                        try {
-                            getnum = (strlist.getOrNull(1)?.toInt() ?: strlist.getOrNull(2)?.toInt())!!
-                        } catch (e: Exception) {
-                            PluginMain.logger.error("转换错误，请确认参数是否为int/Long类型")
+                        if (strlist.size == 2 || (strlist.size == 3 && strlist[0].length > 2)) {
+                            try {
+                                getnum = (strlist.getOrNull(1)?.toInt() ?: strlist.getOrNull(2)?.toInt())!!
+                            } catch (e: Exception) {
+                                PluginMain.logger.error("转换错误，请确认参数是否为int/Long类型")
+                            }
                         }
+                        getImg(urlname, getnum)
+                        return ListeningStatus.LISTENING
                     }
-                    getImg(urlname, getnum)
                 }
+
             }
 
         }
@@ -170,45 +181,51 @@ object BaseEvent : SimpleListenerHost() {
     private suspend fun GroupMessageEvent.Lzsave(arg: String?, sender1: Member) {
         SendTask.sendMessage(group, At(sender1) + "请在30s内发送一张图片")
         val duration = Duration.ofMillis(30000)
-        var isImageSaved = false;
+        var isImageSaved = false
         withTimeoutOrNull(duration) {
             suspendCancellableCoroutine { continuation ->
                 val listener = globalEventChannel().subscribeAlways<GroupMessageEvent> {
                     if (this.sender.id != sender1.id) return@subscribeAlways
-                    var chain = this.message;
-                    val image = chain.findIsInstance<Image>()
-                    if (image != null) {
-                        try {
-                            val url2 = image.queryUrl()
-                            val request = Request.Builder()
-                                .url(url2)
-                                .build()
-                            val response = HttpClient.okHttpClient.newCall(request).execute()
-                            val contentType = response.header("Content-Type")
-                            val fileType = when (contentType) {
-                                "image/jpeg" -> "jpg"
-                                "image/png" -> "png"
-                                "image/gif" -> "gif"
-                                else -> "jpg"
-                            }
+                    if(!isImageSaved){
+                        var chain = this.message
+                        val image = chain.findIsInstance<Image>()
+                        if (image != null) {
+                            try {
+                                val url2 = image.queryUrl()
+                                val request = Request.Builder()
+                                    .url(url2)
+                                    .build()
+                                val response = HttpClient.okHttpClient.newCall(request).execute()
+                                val contentType = response.header("Content-Type")
+                                val fileType = when (contentType) {
+                                    "image/jpeg" -> "jpg"
+                                    "image/png" -> "png"
+                                    "image/gif" -> "gif"
+                                    else -> "jpg"
+                                }
 
-                            val imageByte = response.body!!.bytes()
-                            arg?.let { it1 -> ImageService.saveImage(this.subject.id, it1, imageByte, fileType) }
-                            sendMessage(group, chain + PlainText("保存成功噢"));
-                            isImageSaved = true;
-                        } catch (e: LZException) {
-                            sendMessage(group, "该图库已存在相同图片哦")
-                            isImageSaved = true;
+                                val imageByte = response.body!!.bytes()
+                                arg?.let { it1 -> ImageService.saveImage(this.subject.id, it1, imageByte, fileType) }
+                                sendMessage(group, chain + PlainText("保存成功噢"))
+                                isImageSaved = true
+                                continuation.resume(Unit){}
+                            } catch (e: LZException) {
+                                sendMessage(group, "该图库已存在相同图片哦")
+                                isImageSaved = true
+                                continuation.resume(Unit){}
+                            }
                         }
                     }
-                }
-                continuation.resume(Unit) {}
-            }
-        } ?: run {
-            if (!isImageSaved) {
-                sendMessage(group, At(sender1) + "已超时，请重新发送图片")
-            }
 
+                }
+                if(isImageSaved) listener.complete()
+
+            } ?: run {
+                // 只有在未成功保存图片的情况下才发送超时消息
+                if (!isImageSaved) {
+                    sendMessage(group, At(sender1) + "已超时，请重新发送图片")
+                }
+            }
         }
 
     }
@@ -278,6 +295,7 @@ object BaseEvent : SimpleListenerHost() {
                 && !normalizedName.contains(":")
                 && !normalizedName.startsWith("/")
                 && !normalizedName.startsWith("\\")
+                || blacklist.contains(fileName)
         } catch (e: Exception) {
             return false
         }

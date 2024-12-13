@@ -228,9 +228,9 @@ object ImageService {
 
         val md5a = getMD5(imageByte)
         val filePath = File(fileParent, "$md5a.$fileType")
-        filePath.writeBytes(imageByte)
-//        val file = resolveDataFile(filePath)
-//        file.writeBytes(imageByte)
+//        filePath.writeBytes(imageByte)
+        val file = resolveDataFile(filePath.absolutePath)
+        file.writeBytes(imageByte)
         transaction(db) {
             val entity = ImageFiles.selectAll()
                 .where {
