@@ -18,15 +18,9 @@ dependencies {
     implementation("org.jetbrains.exposed:exposed-crypt:$exposedVersion")
     implementation("org.jetbrains.exposed:exposed-dao:$exposedVersion")
     implementation("org.jetbrains.exposed:exposed-jdbc:$exposedVersion")
-
     implementation("org.jetbrains.exposed:exposed-jodatime:$exposedVersion")
-    // or
     implementation("org.jetbrains.exposed:exposed-java-time:$exposedVersion")
-    // or
     implementation("org.jetbrains.exposed:exposed-kotlin-datetime:$exposedVersion")
-//// https://mvnrepository.com/artifact/org.postgresql/postgresql
-//    implementation("org.postgresql:postgresql:42.7.3")
-// https://mvnrepository.com/artifact/org.xerial/sqlite-jdbc
     implementation("org.xerial:sqlite-jdbc:3.47.1.0")
 
     implementation("org.jetbrains.exposed:exposed-json:$exposedVersion")
