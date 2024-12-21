@@ -3,6 +3,7 @@ package org.huvz.mirai.plugin.util.skia.impl
 import org.jetbrains.skia.*
 import org.huvz.mirai.plugin.entity.GroupDetail
 import org.huvz.mirai.plugin.util.skia.ImageDrawer
+import java.io.InputStream
 
 class GroupInfoDrawer
     (
@@ -13,13 +14,20 @@ class GroupInfoDrawer
     private val lt: Float
         )
     : ImageDrawer {
+    override var fontTypeface: Typeface? = null;
+
     override fun draw(canvas: Canvas) {
         // 绘制群头像
 
         val surfaceBitmap = Surface.makeRasterN32Premul(infoHeight, infoHeight)
+        val fontStream: InputStream = this.javaClass.classLoader.getResourceAsStream("MiSans-Medium.ttf")
+        val fontData = Data.makeFromBytes(fontStream.readBytes());
+        val Mediumtypeface = Typeface.makeFromData(fontData)
 
-
-
+        val surfaceBitmap2 = Surface.makeRasterN32Premul(infoHeight, infoHeight)
+        val fontStream2: InputStream = this.javaClass.classLoader.getResourceAsStream("MiSans-Light.ttf")
+        val fontData2 = Data.makeFromBytes(fontStream.readBytes());
+        val Lighttypeface = Typeface.makeFromData(fontData)
         val avatarRadius = infoHeight / 2f - 10f
         val avatarX = lt + 10f
         val avatarY = infoHeight / 2f - 5f
@@ -42,7 +50,7 @@ class GroupInfoDrawer
         // 绘制群名称
         val nameX = avatarX + avatarRadius + 25f + lt
         val nameY = avatarY - 5f + lt
-        val TitleFont = Font(Typeface.makeFromName("MiSans",FontStyle.BOLD), 24f)
+        val TitleFont = Font(fontTypeface, 24f)
         val TitlePaint = Paint().apply {
             color = Color.BLACK
         }
@@ -50,7 +58,7 @@ class GroupInfoDrawer
         val infoPaint = Paint().apply {
             color = Color.makeRGB(139,139,156)
         }
-        val idtextFont = Font(Typeface.makeFromName("MiSans",FontStyle.ITALIC), 20f)
+        val idtextFont = Font(Lighttypeface, 20f)
         // 群号
 
         canvas.drawString(" ${groupDetail.id}", nameX, nameY + 35f,idtextFont, infoPaint)
@@ -59,7 +67,7 @@ class GroupInfoDrawer
         val infoX = avatarX + avatarRadius + TitleFont.measureTextWidth(groupDetail.name) + lt + 60f
 //        val infoX = outputWidth  - idtextFont.measureText(infoText).width - 200f
         val infoY = nameY
-        val detailtFont = Font(Typeface.makeFromName("MiSans",FontStyle.NORMAL), 20f)
+        val detailtFont = Font(Mediumtypeface, 20f)
 
         val webpaint = Paint().apply {
             color = Color.makeRGB( 	255,142,60)
@@ -103,7 +111,6 @@ class GroupInfoDrawer
 
         val canvas3 = surfaceBitmap2.canvas
         val rect = RRect.makeXYWH(5f,5f,font.measureText(info).width+20f,font.measureText(info).height+10f,10f)
-
 
         val paint = Paint().apply {
             color = Color.makeRGB(20,20,20)

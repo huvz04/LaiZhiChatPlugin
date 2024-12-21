@@ -10,6 +10,8 @@ class MaskDrawer(
     private val lt:Float
 
 ) : ImageDrawer {
+    override var fontTypeface: Typeface? = null
+
     override fun draw(canvas: Canvas) {
 
         val centerX = outputWidth / 2f

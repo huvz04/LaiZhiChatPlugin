@@ -10,6 +10,8 @@ import okhttp3.Request
 import org.huvz.mirai.plugin.PluginMain.logger
 import org.huvz.mirai.plugin.PluginMain.resolveDataFile
 import java.io.Closeable
+import java.io.File
+import java.nio.file.Paths
 import java.util.*
 import kotlin.random.Random
 
@@ -20,7 +22,10 @@ class ImageUtils: Closeable {
         fun GetImage(group: Group, folderpath:String, picnum:Int ): ExternalResource? {
 
             try {
-                val filepath = resolveDataFile("LaiZhi\\${group.id}\\${folderpath}")
+                val path = Paths.get("data", "org.huvz.laizhi", "LaiZhi", group.id.toString(), folderpath)
+//                val filepath = File("data\\org.huvz.laizhi\\LaiZhi\\${group.id}\\${folderpath}")
+                val filepath = File(path.toUri());
+//                logger.info { "开始获取文件夹:${filepath.absolutePath}" }
                 val images = filepath.listFiles { file -> file.extension == "jpg" || file.extension == "png" || file.extension == "gif"}
                 if (images != null && images.isNotEmpty()) {
                     val rad = if(picnum!=-1){
@@ -33,6 +38,8 @@ class ImageUtils: Closeable {
 //                    logger.info { "本地已找到${randomImage.absolutePath}" }
                     val res = randomImage.toExternalResource().toAutoCloseable()
                     return res;
+                }else{
+                    logger.error("获取失败${filepath.absolutePath}")
                 }
 
             }catch (e:Exception){
@@ -79,7 +86,7 @@ class ImageUtils: Closeable {
          */
         public suspend fun delImages(group: Group,from: String, image: Image):Boolean {
             val url = image.queryUrl()
-            val filePath = "LaiZhi/${group.id}\\${from}\\${image.imageId}"
+            val filePath = "LaiZhi\\${group.id}\\${from}\\${image.imageId}"
             val file  = resolveDataFile(filePath)
             if(file.exists()){
 

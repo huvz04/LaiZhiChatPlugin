@@ -8,6 +8,8 @@ class BackgroundDrawer(
     private val outputHeight: Int,
     private val titleText: String
 ) : ImageDrawer {
+    override var fontTypeface: Typeface? = null
+
     override fun draw(canvas: Canvas) {
         val imagePaint = Paint().apply {
             isAntiAlias = true

@@ -6,6 +6,7 @@ import org.huvz.mirai.plugin.entity.ImageFile
 import org.huvz.mirai.plugin.util.skia.ImageDrawer
 import java.io.File
 
+
 class ImagePreviewDrawer(
     private val fileList: Map<String,List<ImageFile>>,
     private val outputWidth: Int,
@@ -16,8 +17,16 @@ class ImagePreviewDrawer(
     private val targetSize:Float
     // 其他参数
 ) : ImageDrawer {
+    override var fontTypeface: Typeface? = null
+
     override fun draw(canvas: Canvas) {
-        val font = Font(Typeface.makeFromName("MiSans",FontStyle.BOLD), 20f)
+
+        val font =
+            if(fontTypeface!=null){
+                Font(fontTypeface, 20f)
+            }
+            else {
+                Font(Typeface.makeFromName("MiSans",FontStyle.BOLD), 20f) }
         val detailPaint = Paint().apply { color = Color.makeRGB(173, 216, 230) }
         val webPaint = Paint().apply { color = Color.makeRGB(240, 248, 255) }
         val ccPaint = Paint().apply { color = Color.makeRGB(242, 80, 66) }
@@ -32,7 +41,7 @@ class ImagePreviewDrawer(
         for ((_, fileList) in fileList) {
             val randoms = fileList.indices.random()
             val chs = fileList[randoms];
-            val file = PluginMain.resolveDataFile(chs.url+"\\${chs.md5}.${chs.type}") // 使用第一个文件
+            val file = PluginMain.resolveDataFile(chs.url+"/${chs.md5}.${chs.type}")
             try {
                 val imageDetail = drawImageDetail(webPaint, file)
                 canvas.drawImage(imageDetail, currentX+20, currentY+lt/2)

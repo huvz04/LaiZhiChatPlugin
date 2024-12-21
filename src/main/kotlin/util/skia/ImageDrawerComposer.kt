@@ -5,11 +5,14 @@ import org.jetbrains.skia.Surface
 import org.huvz.mirai.plugin.entity.GroupDetail
 import org.huvz.mirai.plugin.entity.ImageFile
 import org.huvz.mirai.plugin.util.skia.impl.GroupInfoDrawer
+import org.jetbrains.skia.Data
+import org.jetbrains.skia.Typeface
 import util.skia.impl.BackgroundDrawer
 import util.skia.impl.ImagePreviewDrawer
 import util.skia.impl.MaskDrawer
 import java.io.File
 import java.io.FileOutputStream
+import java.io.InputStream
 
 class ImageDrawerComposer(
     private val outputWidth: Int,
@@ -44,8 +47,12 @@ class ImageDrawerComposer(
 
             GroupInfoDrawer(fileList.size,outputWidth,groupDetail,infoHeight,lt)
         )
+        val fontStream: InputStream = this.javaClass.classLoader.getResourceAsStream("MiSans-Demibold.ttf")
+        val fontData = Data.makeFromBytes(fontStream.readBytes());
+        val typeface = Typeface.makeFromData(fontData)
 
         drawers.forEach { drawer ->
+            drawer.fontTypeface = typeface;
             drawer.draw(canvas)
         }
 
