@@ -4,6 +4,8 @@ import entity.LZException
 import entity.data.GroupDetails
 import entity.data.GroupDetails.key
 import entity.data.ImageFiles
+import entity.data.ImageFiles.about
+import entity.data.ImageFiles.qq
 import net.mamoe.mirai.utils.ExternalResource
 import net.mamoe.mirai.utils.ExternalResource.Companion.toExternalResource
 import org.jetbrains.exposed.sql.*
@@ -60,6 +62,7 @@ object ImageService {
 
     /**
      * 更新并迁移图片
+     *
      */
     suspend fun updateGrouplist(id: Long): Int {
         val ParentfilePath = "LaiZhi/$id"
@@ -272,7 +275,37 @@ object ImageService {
             }
         }
     }
+    /**
+     * 检查图库是否存在
+     */
+    fun checkImage(name: String,qq1:String) :Long{
+        return transaction(db) {
+            ImageFiles.selectAll().where {
+                (about eq name) and (qq eq qq1)
+            }.count()
+        }
 
+    }
+    fun updateMapByClear(qqid: String, name: String) {
+        synchronized(DataMP) {
+            if (DataMP.containsKey(qqid)) {
+                DataMP[qqid]!!.remove(name)
+            }
+        }
+    }
+    /**
+     * 清理整个图库
+     */
+    fun clearImage(name: String,qq1:String) :Int{
+        return transaction(db) {
+            updateMapByClear(qq1,name);
+            ImageFiles.deleteWhere {
+                (about eq name) and (qq eq qq1)
+            }
+
+        }
+
+    }
     /**
      * 删除图片信息
      */

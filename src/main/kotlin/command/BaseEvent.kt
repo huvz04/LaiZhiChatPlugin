@@ -1,9 +1,13 @@
 package org.huvz.mirai.plugin.command
 
+import com.sun.tools.example.debug.expr.ExpressionParserConstants.IF
 import config.LzConfig
 import config.LzConfig.AddcommandList
+import config.LzConfig.Blacklist
 import config.LzConfig.GetcommandList
 import config.LzConfig.Graphicslist
+import config.LzConfig.adminQQid
+import config.LzConfig.clearlist
 import config.LzConfig.enablelist
 import entity.LZException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -30,6 +34,7 @@ import org.huvz.mirai.plugin.PluginMain.DataMP
 import org.huvz.mirai.plugin.Service.ImageService
 import org.huvz.mirai.plugin.Service.ImageService.getGroup
 import org.huvz.mirai.plugin.Service.ImageService.setKey
+import org.huvz.mirai.plugin.command.BaseEvent.blacklist
 import org.huvz.mirai.plugin.entity.GroupDetail
 import org.huvz.mirai.plugin.entity.ImageFile
 import org.huvz.mirai.plugin.util.HttpClient
@@ -47,8 +52,7 @@ object BaseEvent : SimpleListenerHost() {
     override fun handleException(context: CoroutineContext, exception: Throwable) {
         PluginMain.logger.error("未知错误")
     }
-    val  blacklist: List<String> = listOf("图片","image","url");
-    var isKey: Boolean = false;
+    val  blacklist: List<String> = Blacklist
 
     @EventHandler
     suspend fun GroupMessageEvent.onMessage(): ListeningStatus {
@@ -65,7 +69,9 @@ object BaseEvent : SimpleListenerHost() {
                 //get
                 val Gprefix = GetcommandList.firstOrNull() { msg.startsWith(it) }
                 //list
-                val gapfix = Graphicslist.firstOrNull() { msg.equals(it) }
+                val Lapfix = Graphicslist.firstOrNull() { msg.equals(it) }
+                //list
+                val Cperfix = clearlist.firstOrNull() { msg.startsWith(it) }
                 if (Aprefix != null) {
                     val urlname = msg.drop(Aprefix.length).trim()
                     val ck = isPathSafe(urlname)
@@ -75,31 +81,46 @@ object BaseEvent : SimpleListenerHost() {
                     } else {
                         sendMessage(group, "非法名字！")
                     }
-                } else if (gapfix != null) {
+                } else if (Lapfix != null) {
                     getlist(sender);
                     return ListeningStatus.LISTENING
                 }
-                else if(blacklist.contains(msg)){
-                    sendMessage(group, "黑名单图库")
+
+                else if(Cperfix!=null){
+                    var name =  msg.replace(Cperfix,"")
+                    if(adminQQid != sender.id.toString()){
+                        sendMessage(group,At(sender)+"你没有权限执行此操作")
+                    }
+                    else{
+                        if(!isPathSafe(name)){
+                            sendMessage(group, "非法名字！")
+                        }
+                        else{
+                            clear(name);
+                        }
+                    }
+
                 }
                 else{
                     if (getGroup(this.group.id.toString()).key == "1") {
-                        val list = DataMP[this.group.id.toString()]
-//                    if (list?.size == 0) return ListeningStatus.LISTENING
-                        var firstMatched: String? = null
-                        if (list != null) {
-                            for (item in list) {
-                                if (msg.contains(item)) {
-                                    firstMatched = item
-                                    break
+                        if(ImageService.clearImage(msg,group.id.toString())>0)
+                        if(!blacklist.contains(msg)){
+                            val list = DataMP[this.group.id.toString()]
+                            var firstMatched: String? = null
+                            if (list != null) {
+                                for (item in list) {
+                                    if (msg.contains(item)) {
+                                        firstMatched = item
+                                        break
+                                    }
                                 }
                             }
+                            if (firstMatched != null && msg.indexOf(firstMatched)!=-1) {
+                                getImg(firstMatched, -1,0)
+                            }
+                            return ListeningStatus.LISTENING
                         }
-                        if (firstMatched != null && msg.indexOf(firstMatched)!=-1) {
-//                        PluginMain.logger.info("获取图片${firstMatched}")
-                            getImg(firstMatched, -1)
-                        }
-                        return ListeningStatus.LISTENING
+
                     } else if (Gprefix != null) {
                         // -1 随机
                         var getnum = -1
@@ -113,6 +134,11 @@ object BaseEvent : SimpleListenerHost() {
                         } else {
                             msg.drop(Gprefix.length).trim()
                         }
+                        if(blacklist.contains(urlname))
+                        {
+                            sendMessage(group, "黑名单图库")
+                            return ListeningStatus.LISTENING
+                        }
                         if (strlist.size == 2 || (strlist.size == 3 && strlist[0].length > 2)) {
                             try {
                                 getnum = (strlist.getOrNull(1)?.toInt() ?: strlist.getOrNull(2)?.toInt())!!
@@ -120,7 +146,7 @@ object BaseEvent : SimpleListenerHost() {
                                 PluginMain.logger.error("转换错误，请确认参数是否为int/Long类型")
                             }
                         }
-                        getImg(urlname, getnum)
+                        getImg(urlname, getnum,1)
                         return ListeningStatus.LISTENING
                     }
                 }
@@ -141,18 +167,24 @@ object BaseEvent : SimpleListenerHost() {
     /**
      * 获取图片
      */
-    private suspend fun GroupMessageEvent.getImg(arg: String?, arg1: Int) {
+    private suspend fun GroupMessageEvent.getImg(arg: String?, arg1: Int,mode:Int) {
         if (arg != null) {
             val res = ImageUtils.GetImage(group, arg, arg1)
             if (res != null) {
-                this.subject.let {
-                    val img = res.uploadAsImage(it)
+                try {
+                    this.subject.let {
+                        val img = res.uploadAsImage(it)
+                        res.closed
+                        sendMessage(group, img);
+                    }
+                }catch (e:Exception){
                     res.closed
-                    sendMessage(group, img);
                 }
+
             } else {
 //                res?.closed
-                sendMessage(group, "目录下找不到图片噢")
+                if(mode==1)
+                    sendMessage(group, "目录下找不到图片噢")
             }
         }
     }
@@ -160,20 +192,22 @@ object BaseEvent : SimpleListenerHost() {
     /**
      * 清理图库
      */
-//    private suspend fun GroupMessageEvent.clear(filename: String) {
+    private suspend fun GroupMessageEvent.clear(filename: String) {
 //        if (filename in LzConfig.ProtectImageList)
 //            this.group.sendMessage(At(sender) + "这是受保护的图库，你无法删除噢")
 //        else {
-//            var file = File(PluginMain.dataFolderPath.toString() + "/LaiZhi/${this.group.id}/$filename")
-//            try {
-//                file.deleteRecursively()
-//            } catch (e: Exception) {
-//                this.group.sendMessage("未知错误")
-//                e.printStackTrace()
-//            }
+            var file = File(PluginMain.dataFolderPath.toString() + "/LaiZhi/${this.group.id}/$filename")
+            try {
+                val cnt  = ImageService.clearImage(filename,group.id.toString())
+                file.deleteRecursively()
+                this.group.sendMessage("已经清理了${filename}中的${cnt}条数据")
+            } catch (e: Exception) {
+                this.group.sendMessage("未知错误")
+                e.printStackTrace()
+            }
 //        }
-//
-//    }
+
+    }
     /**
      * 添加图片
      */
