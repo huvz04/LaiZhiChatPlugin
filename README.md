@@ -3,7 +3,7 @@
 > 基于 Mirai QQ机器人的发图插件
 
 [![Static Badge](https://img.shields.io/badge/Mirai-2.16.0-yellow)](https://github.com/mamoe/mirai)
-[![Static Badge](https://img.shields.io/badge/release-0.5.1-blue)](https://github.com/Long-Chuan-Club/LaiZhiChatPlugin/releases)
+[![Static Badge](https://img.shields.io/badge/release-0.5.1-blue)](https://github.com/huvz04/LaiZhiChatPlugin/releases)
 
 
 :warning:  **最新版本已经内置了 [MiSans](https://hyperos.mi.com/font/zh/download/) 字体**<br>
