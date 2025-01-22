@@ -11,6 +11,7 @@ import config.LzConfig.clearlist
 import config.LzConfig.enablelist
 import entity.LZException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.time.withTimeoutOrNull
@@ -31,8 +32,10 @@ import net.mamoe.mirai.utils.ExternalResource.Companion.uploadAsImage
 import okhttp3.Request
 import org.huvz.mirai.plugin.PluginMain
 import org.huvz.mirai.plugin.PluginMain.DataMP
+import org.huvz.mirai.plugin.PluginMain.logger
 import org.huvz.mirai.plugin.Service.ImageService
 import org.huvz.mirai.plugin.Service.ImageService.getGroup
+import org.huvz.mirai.plugin.Service.ImageService.isPathSafe
 import org.huvz.mirai.plugin.Service.ImageService.setKey
 import org.huvz.mirai.plugin.command.BaseEvent.blacklist
 import org.huvz.mirai.plugin.entity.GroupDetail
@@ -216,6 +219,7 @@ object BaseEvent : SimpleListenerHost() {
         SendTask.sendMessage(group, At(sender1) + "请在30s内发送一张图片")
         val duration = Duration.ofMillis(30000)
         var isImageSaved = false
+        try{
         withTimeoutOrNull(duration) {
             suspendCancellableCoroutine { continuation ->
                 val listener = globalEventChannel().subscribeAlways<GroupMessageEvent> {
@@ -252,13 +256,16 @@ object BaseEvent : SimpleListenerHost() {
                     }
 
                 }
-                if(isImageSaved) listener.complete()
-
-            } ?: run {
-                // 只有在未成功保存图片的情况下才发送超时消息
-                if (!isImageSaved) {
-                    sendMessage(group, At(sender1) + "已超时，请重新发送图片")
+                if(isImageSaved) {
+                    PluginMain.logger.info("协程已关闭")
+                    listener.complete()
                 }
+            }
+
+
+        }}catch (e: TimeoutCancellationException){
+            if (!isImageSaved) {
+                sendMessage(group, At(sender1) + "已超时，请重新发送图片")
             }
         }
 
