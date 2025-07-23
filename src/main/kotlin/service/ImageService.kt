@@ -316,6 +316,69 @@ object ImageService {
     }
 
     /**
+     * 删除指定图库中的单张图片
+     */
+    fun deleteImageByMd5(groupId: String, galleryName: String, md5: String): Boolean {
+        return transaction(db) {
+            // 先查询文件信息
+            val imageFile = ImageFiles.selectAll()
+                .where { 
+                    (ImageFiles.qq eq groupId) and 
+                    (ImageFiles.about eq galleryName) and 
+                    (ImageFiles.md5 eq md5)
+                }.firstOrNull()
+            
+            if (imageFile != null) {
+                // 删除数据库记录
+                val deletedCount = ImageFiles.deleteWhere { 
+                    (ImageFiles.qq eq groupId) and 
+                    (ImageFiles.about eq galleryName) and 
+                    (ImageFiles.md5 eq md5)
+                }
+                
+                // 删除本地文件
+                if (deletedCount > 0) {
+                    try {
+                        val fileType = imageFile[ImageFiles.type]
+                        val filePath = "LaiZhi/$groupId/$galleryName/$md5.$fileType"
+                        val file = PluginMain.resolveDataFile(filePath)
+                        if (file.exists()) {
+                            file.delete()
+                        }
+                    } catch (e: Exception) {
+                        PluginMain.logger.error("删除本地文件失败: ${e.message}")
+                    }
+                }
+                
+                deletedCount > 0
+            } else {
+                false
+            }
+        }
+    }
+
+    /**
+     * 获取指定图库的所有图片
+     */
+    fun selectImagesByGallery(groupId: Long, galleryName: String): List<ImageFile> {
+        return transaction(db) {
+            ImageFiles.selectAll()
+                .where { (ImageFiles.qq eq groupId.toString()) and (ImageFiles.about eq galleryName) }
+                .map {
+                    ImageFile(
+                        it[ImageFiles.id] ?: 0,
+                        it[ImageFiles.md5] ?: "",
+                        it[ImageFiles.qq] ?: "",
+                        it[ImageFiles.count] ?: 0,
+                        it[ImageFiles.about] ?: "",
+                        it[ImageFiles.type] ?: "",
+                        it[ImageFiles.url] ?: ""
+                    )
+                }
+        }
+    }
+
+    /**
      * 计算MD5
      */
     fun getMD5(bytes: ByteArray): String {

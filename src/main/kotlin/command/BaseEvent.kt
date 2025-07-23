@@ -9,17 +9,16 @@ import config.LzConfig.Graphicslist
 import config.LzConfig.adminQQid
 import config.LzConfig.clearlist
 import config.LzConfig.enablelist
+import config.LzConfig.deleteImagelist
+import config.LzConfig.previewImagelist
+import config.LzConfig.helplist
+import config.LzConfig.drawMultipleList
+import config.LzConfig.maxDrawCount
 import entity.LZException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.async
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.time.withTimeoutOrNull
-import net.mamoe.mirai.console.command.CommandSender
-import net.mamoe.mirai.console.command.getGroupOrNull
-import net.mamoe.mirai.contact.Contact
-import net.mamoe.mirai.contact.Contact.Companion.sendImage
-import net.mamoe.mirai.contact.Group
 import net.mamoe.mirai.contact.Member
 import net.mamoe.mirai.event.EventHandler
 import net.mamoe.mirai.event.ListeningStatus
@@ -44,7 +43,9 @@ import org.huvz.mirai.plugin.util.HttpClient
 import org.huvz.mirai.plugin.util.ImageUtils
 import org.huvz.mirai.plugin.util.SendTask
 import org.huvz.mirai.plugin.util.SendTask.Companion.sendMessage
+import org.huvz.mirai.plugin.util.skia.GalleryDetailComposer
 import util.skia.ImageDrawerComposer
+import org.huvz.mirai.plugin.util.skia.impl.GalleryDetailDrawer
 import java.io.File
 import java.io.IOException
 import java.time.Duration
@@ -60,9 +61,6 @@ object BaseEvent : SimpleListenerHost() {
     @EventHandler
     suspend fun GroupMessageEvent.onMessage(): ListeningStatus {
         val msg = message.content;
-        val urlname: String?
-
-
         val keyword = enablelist.firstOrNull() { msg.equals(it) }
         when (msg) {
             keyword -> setKeyWord()
@@ -73,19 +71,73 @@ object BaseEvent : SimpleListenerHost() {
                 val Gprefix = GetcommandList.firstOrNull() { msg.startsWith(it) }
                 //list
                 val Lapfix = Graphicslist.firstOrNull() { msg.equals(it) }
-                //list
+                //clear
                 val Cperfix = clearlist.firstOrNull() { msg.startsWith(it) }
+                //delete single image
+                val Dprefix = deleteImagelist.firstOrNull() { msg.startsWith(it) }
+                //preview gallery
+                val Pprefix = previewImagelist.firstOrNull() { msg.startsWith(it) }
+                //help
+                val Hprefix = helplist.firstOrNull() { msg.equals(it) }
+                //draw multiple
+                val Mprefix = drawMultipleList.firstOrNull() { msg.startsWith(it) }
                 if (Aprefix != null) {
                     val urlname = msg.drop(Aprefix.length).trim()
                     val ck = isPathSafe(urlname)
-                    if (ck) {
+                    if (ck && !blacklist.contains(urlname)) {
                         Lzsave(urlname, sender)
+                        return ListeningStatus.LISTENING
+                    } else if (blacklist.contains(urlname)) {
+                        // 忽略黑名单图库，不做任何处理
                         return ListeningStatus.LISTENING
                     } else {
                         sendMessage(group, "非法名字！")
                     }
                 } else if (Lapfix != null) {
                     getlist(sender);
+                    return ListeningStatus.LISTENING
+                } else if (Hprefix != null) {
+                    showHelp();
+                    return ListeningStatus.LISTENING
+                } else if (Mprefix != null) {
+                    val params = msg.drop(Mprefix.length).trim().split(" ")
+                    if (params.size >= 2) {
+                        val countStr = params[0]
+                        val galleryName = params[1]
+                        try {
+                            val count = countStr.toInt()
+                            if (count > 0 && count <= maxDrawCount) {
+                                if (!blacklist.contains(galleryName)) {
+                                    drawMultipleImages(galleryName, count)
+                                }
+                                // 如果是黑名单图库，静默忽略
+                            } else {
+                                sendMessage(group, "抽取次数必须在1到${maxDrawCount}之间")
+                            }
+                        } catch (e: NumberFormatException) {
+                            sendMessage(group, "请输入有效的数字")
+                        }
+                    } else {
+                        sendMessage(group, "格式错误！请使用：抽 [次数] [图库名]")
+                    }
+                    return ListeningStatus.LISTENING
+                } else if (Dprefix != null) {
+                    val params = msg.drop(Dprefix.length).trim().split(" ")
+                    if (params.size >= 2) {
+                        val galleryName = params[0]
+                        val imageNumber = params[1]
+                        deleteImageFromGallery(galleryName, imageNumber)
+                    } else {
+                        sendMessage(group, "格式错误！请使用：删除图片 [图库名] [序号]")
+                    }
+                    return ListeningStatus.LISTENING
+                } else if (Pprefix != null) {
+                    val galleryName = msg.drop(Pprefix.length).trim()
+                    if (galleryName.isNotEmpty()) {
+                        previewGallery(galleryName)
+                    } else {
+                        sendMessage(group, "请指定图库名称！")
+                    }
                     return ListeningStatus.LISTENING
                 }
 
@@ -112,7 +164,7 @@ object BaseEvent : SimpleListenerHost() {
                             var firstMatched: String? = null
                             if (list != null) {
                                 for (item in list) {
-                                    if (msg.contains(item)) {
+                                    if (msg.equals(item)) {
                                         firstMatched = item
                                         break
                                     }
@@ -139,7 +191,7 @@ object BaseEvent : SimpleListenerHost() {
                         }
                         if(blacklist.contains(urlname))
                         {
-                            sendMessage(group, "黑名单图库")
+                            // 忽略黑名单图库，不做任何处理
                             return ListeningStatus.LISTENING
                         }
                         if (strlist.size == 2 || (strlist.size == 3 && strlist[0].length > 2)) {
@@ -186,8 +238,8 @@ object BaseEvent : SimpleListenerHost() {
 
             } else {
 //                res?.closed
-                if(mode==1)
-                    sendMessage(group, "目录下找不到图片噢")
+//                if(mode==1)
+//                    sendMessage(group, "目录下找不到图片噢")
             }
         }
     }
@@ -257,7 +309,7 @@ object BaseEvent : SimpleListenerHost() {
 
                 }
                 if(isImageSaved) {
-                    PluginMain.logger.info("协程已关闭")
+//                    PluginMain.logger.info("协程已关闭")
                     listener.complete()
                 }
             }
@@ -291,6 +343,11 @@ object BaseEvent : SimpleListenerHost() {
         );
         val newMap: HashMap<String, ArrayList<ImageFile>> = hashMapOf()
         for (i in list) {
+            // 跳过黑名单图库
+            if (blacklist.contains(i.about)) {
+                continue
+            }
+            
             var list2: ArrayList<ImageFile> = arrayListOf()
             try {
                 if (newMap[i.about] != null) {
@@ -330,15 +387,211 @@ object BaseEvent : SimpleListenerHost() {
                 .replace(".\\", "")
                 .replace("/./", "/")
                 .replace("\\.\\", "\\")
-
-            return normalizedName.matches(Regex("^[a-zA-Z0-9\u4e00-\u9fa5]+$"))
-                && !normalizedName.contains("..")
-                && !normalizedName.contains(":")
-                && !normalizedName.startsWith("/")
-                && !normalizedName.startsWith("\\")
-                || blacklist.contains(fileName)
+            if(fileName.length<30)
+                return normalizedName.matches(Regex("^[a-zA-Z0-9\u4e00-\u9fa5]+$"))
+                    && !normalizedName.contains("..")
+                    && !normalizedName.contains(":")
+                    && !normalizedName.startsWith("/")
+                    && !normalizedName.startsWith("\\")
+            return false
         } catch (e: Exception) {
             return false
+        }
+    }
+
+    /**
+     * 删除图库中的单张图片（使用序号）
+     */
+    private suspend fun GroupMessageEvent.deleteImageFromGallery(galleryName: String, imageNumber: String) {
+        if (adminQQid != sender.id.toString()) {
+            sendMessage(group, At(sender) + "你没有权限执行此操作")
+            return
+        }
+        
+        if (!isPathSafe(galleryName)) {
+            sendMessage(group, "非法图库名称！")
+            return
+        }
+        
+        try {
+            val number = imageNumber.toIntOrNull()
+            if (number == null || number <= 0) {
+                sendMessage(group, "请输入有效的序号（正整数）")
+                return
+            }
+            
+            // 获取图库中的所有图片
+            val images = ImageService.selectImagesByGallery(group.id, galleryName)
+            if (images.isEmpty()) {
+                sendMessage(group, "图库 $galleryName 中没有图片")
+                return
+            }
+            
+            if (number > images.size) {
+                sendMessage(group, "序号超出范围！图库 $galleryName 中只有 ${images.size} 张图片")
+                return
+            }
+            
+            // 获取要删除的图片（序号从1开始，数组索引从0开始）
+            val imageToDelete = images[number - 1]
+            val success = ImageService.deleteImageByMd5(group.id.toString(), galleryName, imageToDelete.md5)
+            
+            if (success) {
+                sendMessage(group, "已成功删除图库 $galleryName 中的第 $number 张图片")
+            } else {
+                sendMessage(group, "删除失败，未找到指定的图片")
+            }
+        } catch (e: NumberFormatException) {
+            sendMessage(group, "请输入有效的序号（正整数）")
+        } catch (e: Exception) {
+            sendMessage(group, "删除图片时发生错误: ${e.message}")
+            PluginMain.logger.error("删除图片错误", e)
+        }
+    }
+
+    /**
+     * 预览图库中的所有图片
+     */
+    private suspend fun GroupMessageEvent.previewGallery(galleryName: String) {
+        if (!isPathSafe(galleryName)) {
+            sendMessage(group, "非法图库名称！")
+            return
+        }
+        
+        try {
+            val images = ImageService.selectImagesByGallery(group.id, galleryName)
+            if (images.isEmpty()) {
+                sendMessage(group, "图库 $galleryName 中没有图片")
+                return
+            }
+            // 计算输出高度，与GalleryDetailDrawer保持一致
+            val rows = (images.size + 6 - 1) / 6
+            val outputHeight = 100 + 40 + rows * (185f + 40f + 40f) + 40
+            
+            val drawer = GalleryDetailComposer(
+                outputWidth = 1430,
+                outputHeight = outputHeight.toInt(),
+                titleText = "图库详情",
+                galleryName = galleryName,
+                imageList = images,
+                lt = 40f,
+                infoHeight = 100,
+                targetSize = 185f
+            )
+//            val drawer = GalleryDetailComposer(galleryName, images)
+            val resultFile = drawer.draw()
+            
+            this.subject.let {
+                val img = resultFile.uploadAsImage(it)
+                SendTask.sendMessage(group, img)
+            }
+            
+            // 清理临时文件
+            resultFile.delete()
+        } catch (e: Exception) {
+            sendMessage(group, "预览图库时发生错误: ${e.message}")
+            PluginMain.logger.error("预览图库错误", e)
+        }
+    }
+
+    /**
+     * 显示帮助信息
+     */
+    private suspend fun GroupMessageEvent.showHelp() {
+        val helpText = buildString {
+            appendLine("📚 来只管理帮助")
+            appendLine("━━━━━━━━━━━━━━━━━━━━")
+            appendLine("🔍 查看图库：")
+            appendLine("  ${Graphicslist.joinToString("、")} - 查看所有图库")
+            appendLine()
+            appendLine("🖼️ 获取图片：")
+            appendLine("  ${GetcommandList.joinToString("、")} [图库名] - 随机获取图片")
+            appendLine("  ${GetcommandList.joinToString("、")} [图库名] [数量] - 获取指定数量图片")
+            appendLine()
+            appendLine("🎲 抽取多次：")
+            appendLine("  ${drawMultipleList.joinToString("、")} [次数] [图库名] - 一次性抽取多张图片")
+            appendLine()
+            appendLine("➕ 添加图片：")
+            appendLine("  ${AddcommandList.joinToString("、")} [图库名] - 添加图片到指定图库")
+            appendLine()
+            appendLine("🗑️ 管理图库：")
+            appendLine("  ${clearlist.joinToString("、")} [图库名] - 清空整个图库 (仅管理员)")
+            appendLine("  ${deleteImagelist.joinToString("、")} [图库名] [序号] - 删除单张图片 (仅管理员)")
+            appendLine()
+            appendLine("👀 预览图库：")
+            appendLine("  ${previewImagelist.joinToString("、")} [图库名] - 预览图库所有图片")
+            appendLine()
+            appendLine("❓ 其他：")
+            appendLine("  ${helplist.joinToString("、")} - 显示此帮助信息")
+            appendLine("━━━━━━━━━━━━━━━━━━━━")
+            appendLine("💡 提示：图片序号可通过预览图库命令获取，序号从1开始")
+            appendLine("💡 抽取次数限制：1-${maxDrawCount}次")
+        }
+        
+        sendMessage(group, helpText)
+    }
+
+    /**
+     * 抽取多张图片并使用转发消息发送
+     */
+    private suspend fun GroupMessageEvent.drawMultipleImages(galleryName: String, count: Int) {
+        if (!isPathSafe(galleryName)) {
+            sendMessage(group, "非法图库名称！")
+            return
+        }
+        
+        try {
+            val images = mutableListOf<Image>()
+            
+            // 获取多张图片
+            for (i in 1..count) {
+                val res = ImageUtils.GetImage(group, galleryName, -1) // -1表示随机
+                if (res != null) {
+                    try {
+                        val img = res.uploadAsImage(subject)
+                        images.add(img)
+                        res.close()
+                    } catch (e: Exception) {
+                        res.close()
+                        PluginMain.logger.error("上传图片失败", e)
+                    }
+                }
+            }
+            
+            if (images.isNotEmpty()) {
+                // 构建转发消息
+                val forwardMessage = buildForwardMessage(subject) {
+                    // 添加标题消息
+                    add(
+                        senderId = bot.id,
+                        senderName = bot.nick,
+                        time = (System.currentTimeMillis() / 1000).toInt()
+                    ) {
+                        + PlainText("🎲 从图库「$galleryName」抽取了${images.size}张图片")
+                    }
+                    
+                    // 添加所有图片消息
+                    images.forEachIndexed { index, img ->
+                        add(
+                            senderId = bot.id,
+                            senderName = bot.nick,
+                            time = (System.currentTimeMillis() / 1000).toInt()
+                        ) {
+                            + PlainText("第${index + 1}张")
+                            + img
+                        }
+                    }
+                }
+                
+                // 发送转发消息
+                group.sendMessage(forwardMessage)
+            } else {
+                sendMessage(group, "图库 $galleryName 中没有图片或图片获取失败")
+            }
+            
+        } catch (e: Exception) {
+            sendMessage(group, "抽取图片时发生错误: ${e.message}")
+            PluginMain.logger.error("抽取多张图片错误", e)
         }
     }
 

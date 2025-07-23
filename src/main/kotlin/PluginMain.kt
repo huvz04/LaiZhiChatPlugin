@@ -16,7 +16,7 @@ object PluginMain : KotlinPlugin(
     JvmPluginDescription(
         id = "org.huvz.laizhi",
         name = "LaiZhiXX",
-        version = "0.5.1"
+        version = "0.5.3"
     ) {
         author("Huvz")
         info(

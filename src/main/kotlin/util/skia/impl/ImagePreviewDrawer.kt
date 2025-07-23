@@ -15,7 +15,7 @@ class ImagePreviewDrawer(
     private val infoHeight:Int,
     private val lt:Float,
     private val targetSize:Float
-    // 其他参数
+
 ) : ImageDrawer {
     override var fontTypeface: Typeface? = null
 
@@ -88,7 +88,7 @@ class ImagePreviewDrawer(
                 addRRect(rect)
             }
             ,paint)
-        // 缩放原始图像并绘制到新的图像对象上
+
         var image :Image = Image.makeFromEncoded(originalImage.readBytes())
 
         canvas3.drawImageRect(
