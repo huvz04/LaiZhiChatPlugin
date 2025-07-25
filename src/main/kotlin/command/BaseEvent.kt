@@ -118,7 +118,7 @@ object BaseEvent : SimpleListenerHost() {
                             sendMessage(group, "请输入有效的数字")
                         }
                     } else {
-                        sendMessage(group, "格式错误！请使用：抽 [次数] [图库名]")
+//                        sendMessage(group, "格式错误！请使用：抽 [次数] [图库名]")
                     }
                     return ListeningStatus.LISTENING
                 } else if (Dprefix != null) {
