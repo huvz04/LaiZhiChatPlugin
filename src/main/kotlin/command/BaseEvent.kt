@@ -14,6 +14,9 @@ import config.LzConfig.previewImagelist
 import config.LzConfig.helplist
 import config.LzConfig.drawMultipleList
 import config.LzConfig.maxDrawCount
+import config.LzConfig.rebuildDatabaseList
+import config.LzConfig.enableProbabilityReply
+import config.LzConfig.replyProbability
 import entity.LZException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.TimeoutCancellationException
@@ -48,6 +51,7 @@ import util.skia.ImageDrawerComposer
 import org.huvz.mirai.plugin.util.skia.impl.GalleryDetailDrawer
 import java.io.File
 import java.io.IOException
+import java.nio.file.Paths
 import java.time.Duration
 import kotlin.coroutines.CoroutineContext
 
@@ -81,6 +85,8 @@ object BaseEvent : SimpleListenerHost() {
                 val Hprefix = helplist.firstOrNull() { msg.equals(it) }
                 //draw multiple
                 val Mprefix = drawMultipleList.firstOrNull() { msg.startsWith(it) }
+                //rebuild database
+                val Rprefix = rebuildDatabaseList.firstOrNull() { msg.startsWith(it) }
                 if (Aprefix != null) {
                     val urlname = msg.drop(Aprefix.length).trim()
                     val ck = isPathSafe(urlname)
@@ -139,6 +145,28 @@ object BaseEvent : SimpleListenerHost() {
                         sendMessage(group, "请指定图库名称！")
                     }
                     return ListeningStatus.LISTENING
+                } else if (Rprefix != null) {
+                    // 重建数据库指令
+                    if (adminQQid != sender.id.toString()) {
+                        sendMessage(group, At(sender) + "你没有权限执行此操作")
+                    } else {
+                        val params = msg.drop(Rprefix.length).trim()
+                        val groupId = if (params.isNotEmpty()) {
+                            try {
+                                params.toLong()
+                            } catch (e: NumberFormatException) {
+                                sendMessage(group, "群聊ID格式错误！")
+                                return ListeningStatus.LISTENING
+                            }
+                        } else {
+                            null // 重建所有群聊
+                        }
+                        
+                        sendMessage(group, "开始重建数据库，请稍候...")
+                        val result = ImageService.rebuildDatabase(groupId)
+                        sendMessage(group, result)
+                    }
+                    return ListeningStatus.LISTENING
                 }
 
                 else if(Cperfix!=null){
@@ -157,26 +185,8 @@ object BaseEvent : SimpleListenerHost() {
 
                 }
                 else{
-                    if (getGroup(this.group.id.toString()).key == "1") {
-                        if(ImageService.clearImage(msg,group.id.toString())>0)
-                        if(!blacklist.contains(msg)){
-                            val list = DataMP[this.group.id.toString()]
-                            var firstMatched: String? = null
-                            if (list != null) {
-                                for (item in list) {
-                                    if (msg.equals(item)) {
-                                        firstMatched = item
-                                        break
-                                    }
-                                }
-                            }
-                            if (firstMatched != null && msg.indexOf(firstMatched)!=-1) {
-                                getImg(firstMatched, -1,0)
-                            }
-                            return ListeningStatus.LISTENING
-                        }
-
-                    } else if (Gprefix != null) {
+                    // 优先处理"来只"指令，始终100%触发
+                    if (Gprefix != null) {
                         // -1 随机
                         var getnum = -1
                         val strlist = msg.split(" ")
@@ -203,6 +213,49 @@ object BaseEvent : SimpleListenerHost() {
                         }
                         getImg(urlname, getnum,1)
                         return ListeningStatus.LISTENING
+                    } else if (getGroup(this.group.id.toString()).key == "1") {
+                        // 关键字匹配模式，使用概率触发
+                        // 检查是否是其他功能的命令，如果是则跳过关键字匹配
+                        val isOtherCommand = LzConfig.GetcommandList.any { msg.startsWith(it) } ||
+                                LzConfig.AddcommandList.any { msg.startsWith(it) } ||
+                                LzConfig.clearlist.any { msg.startsWith(it) } ||
+                                LzConfig.deleteImagelist.any { msg.startsWith(it) } ||
+                                LzConfig.previewImagelist.any { msg.startsWith(it) } ||
+                                LzConfig.helplist.any { msg.startsWith(it) } ||
+                                LzConfig.drawMultipleList.any { msg.startsWith(it) } ||
+                                LzConfig.enablelist.any { msg.startsWith(it) } ||
+                                LzConfig.rebuildDatabaseList.any { msg.startsWith(it) }
+                        
+                        if (!isOtherCommand && !blacklist.contains(msg)) {
+                            try {
+                                // 关键字匹配模式下的概率回复设置
+                                val shouldReply = if (enableProbabilityReply) {
+                                    val random = kotlin.random.Random.nextInt(1, 101)
+                                    random <= replyProbability
+                                } else {
+                                    true // 如果没有开启概率回复，则总是回复
+                                }
+                                
+                                if (shouldReply) {
+                                    val list = DataMP[this.group.id.toString()]
+                                    var firstMatched: String? = null
+                                    if (list != null) {
+                                        for (item in list) {
+                                            if (msg.contains(item)) {
+                                                firstMatched = item
+                                                break
+                                            }
+                                        }
+                                    }
+                                    if (firstMatched != null) {
+                                        getImg(firstMatched, -1, 0)
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                PluginMain.logger.error("关键字匹配异常: ${e.message}")
+                            }
+                            return ListeningStatus.LISTENING
+                        }
                     }
                 }
 
@@ -521,11 +574,24 @@ object BaseEvent : SimpleListenerHost() {
             appendLine("👀 预览图库：")
             appendLine("  ${previewImagelist.joinToString("、")} [图库名] - 预览图库所有图片")
             appendLine()
+            appendLine("🔧 系统管理：")
+            appendLine("  ${rebuildDatabaseList.joinToString("、")} - 重建所有群聊数据库 (仅管理员)")
+            appendLine("  ${rebuildDatabaseList.joinToString("、")} [群聊ID] - 重建指定群聊数据库 (仅管理员)")
+            appendLine("  ${enablelist.joinToString("、")} - 切换关键字匹配模式")
+            appendLine()
             appendLine("❓ 其他：")
             appendLine("  ${helplist.joinToString("、")} - 显示此帮助信息")
             appendLine("━━━━━━━━━━━━━━━━━━━━")
             appendLine("💡 提示：图片序号可通过预览图库命令获取，序号从1开始")
             appendLine("💡 抽取次数限制：1-${maxDrawCount}次")
+            appendLine("💡 重建数据库：扫描本地目录结构，将丢失的图片重新添加到数据库")
+            appendLine("💡 关键字模式：开启后，包含图库名的消息会自动触发图片发送")
+            appendLine("💡 触发机制：「来只」指令始终100%触发，关键字模式支持概率触发")
+            if (enableProbabilityReply) {
+                appendLine("💡 当前关键字模式概率回复：${replyProbability}%")
+            } else {
+                appendLine("💡 当前关键字模式概率回复：100%（未开启概率模式）")
+            }
         }
         
         sendMessage(group, helpText)
@@ -541,19 +607,57 @@ object BaseEvent : SimpleListenerHost() {
         }
         
         try {
+            // 检查图库中的图片总数
+            val path = Paths.get("data", "org.huvz.laizhi", "LaiZhi", group.id.toString(), galleryName)
+            val filepath = File(path.toUri())
+            val allImages = filepath.listFiles { file -> 
+                file.extension == "jpg" || file.extension == "png" || file.extension == "gif"
+            }
+            
+            if (allImages == null || allImages.isEmpty()) {
+                sendMessage(group, "图库 $galleryName 中没有图片")
+                return
+            }
+            
+            val totalImageCount = allImages.size
+            val actualCount = minOf(count, totalImageCount)
             val images = mutableListOf<Image>()
             
-            // 获取多张图片
-            for (i in 1..count) {
-                val res = ImageUtils.GetImage(group, galleryName, -1) // -1表示随机
-                if (res != null) {
-                    try {
-                        val img = res.uploadAsImage(subject)
-                        images.add(img)
-                        res.close()
-                    } catch (e: Exception) {
-                        res.close()
-                        PluginMain.logger.error("上传图片失败", e)
+            if (actualCount >= totalImageCount) {
+                // 如果请求数量大于等于总数量，获取所有图片
+                for (i in 0 until totalImageCount) {
+                    val res = ImageUtils.GetImage(group, galleryName, i + 1) // 1-based index
+                    if (res != null) {
+                        try {
+                            val img = res.uploadAsImage(subject)
+                            images.add(img)
+                            res.close()
+                        } catch (e: Exception) {
+                            res.close()
+                            PluginMain.logger.error("上传图片失败", e)
+                        }
+                    }
+                }
+            } else {
+                // 使用新的随机算法避免重复
+                val randomIndices = ImageUtils.getRandomIndices(
+                    totalImageCount, 
+                    actualCount, 
+                    group.id.toString(), 
+                    galleryName
+                )
+                
+                for (index in randomIndices) {
+                    val res = ImageUtils.GetImage(group, galleryName, index + 1) // 1-based index
+                    if (res != null) {
+                        try {
+                            val img = res.uploadAsImage(subject)
+                            images.add(img)
+                            res.close()
+                        } catch (e: Exception) {
+                            res.close()
+                            PluginMain.logger.error("上传图片失败", e)
+                        }
                     }
                 }
             }
@@ -567,7 +671,7 @@ object BaseEvent : SimpleListenerHost() {
                         senderName = bot.nick,
                         time = (System.currentTimeMillis() / 1000).toInt()
                     ) {
-                        + PlainText("🎲 从图库「$galleryName」抽取了${images.size}张图片")
+                        + PlainText("🎲 从图库「$galleryName」抽取了${images.size}张图片${if (actualCount < count) "（图库总共${totalImageCount}张）" else ""}")
                     }
                     
                     // 添加所有图片消息

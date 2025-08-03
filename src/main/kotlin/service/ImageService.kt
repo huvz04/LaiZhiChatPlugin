@@ -41,6 +41,26 @@ object ImageService {
             SchemaUtils.create(ImageFiles)
             SchemaUtils.create(GroupDetails)
         }
+        // 启动时自动备份数据库
+        backupDatabase()
+    }
+    
+    /**
+     * 备份数据库
+     */
+    fun backupDatabase() {
+        try {
+            val dbFile = PluginMain.resolveDataFile("LaiZhi.db")
+            if (dbFile.exists()) {
+                val timestamp = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
+                val backupFile = PluginMain.resolveDataFile("backup/LaiZhi_backup_$timestamp.db")
+                backupFile.parentFile?.mkdirs()
+                dbFile.copyTo(backupFile, overwrite = true)
+                PluginMain.logger.info("数据库备份成功: ${backupFile.name}")
+            }
+        } catch (e: Exception) {
+            PluginMain.logger.error("数据库备份失败: ${e.message}")
+        }
     }
 
     /**
@@ -99,25 +119,168 @@ object ImageService {
         }
         return 1
     }
-    //校验脏数据
-    fun deleteUnsafeFiles(): Int {
-        var deletedCount = 0
-        return transaction {
-            ImageFiles.selectAll().where { ImageFiles.about.like("%/%") }.forEach { result ->
-                val aboutValue = result[ImageFiles.about]
-                val urlValue = result[ImageFiles.url]
-                if (!isPathSafe(aboutValue)) {
-                    ImageFiles.deleteWhere { ImageFiles.about eq aboutValue }
-                    deletedCount++
-                } else {
-                    val file = resolveDataFile(urlValue)
-                    if (!file.exists() || file.length() == 0L) {
-                        file.delete()
-                        ImageFiles.deleteWhere { ImageFiles.url eq urlValue }
-                        deletedCount++
+    
+    /**
+     * 重建指定群聊的数据库
+     * @param groupId 群聊ID，如果为null则重建所有群聊
+     * @return 重建结果信息
+     */
+    suspend fun rebuildDatabase(groupId: Long? = null): String {
+        return try {
+            var totalProcessed = 0
+            var totalAdded = 0
+            
+            if (groupId != null) {
+                // 重建指定群聊
+                val result = rebuildSingleGroup(groupId)
+                totalProcessed = result.first
+                totalAdded = result.second
+                "群聊 $groupId 重建完成！扫描了 $totalProcessed 个文件，新增 $totalAdded 张图片到数据库"
+            } else {
+                // 重建所有群聊
+                val laizhiDir = PluginMain.resolveDataFile("LaiZhi")
+                if (!laizhiDir.exists()) {
+                    return "LaiZhi目录不存在，无法重建数据库"
+                }
+                
+                val groupDirs = laizhiDir.listFiles { file -> file.isDirectory && file.name.matches(Regex("\\d+")) }
+                if (groupDirs.isNullOrEmpty()) {
+                    return "未找到任何群聊目录"
+                }
+                
+                for (groupDir in groupDirs) {
+                    val gid = groupDir.name.toLongOrNull()
+                    if (gid != null) {
+                        val result = rebuildSingleGroup(gid)
+                        totalProcessed += result.first
+                        totalAdded += result.second
+                    }
+                }
+                "全部群聊重建完成！总共扫描了 $totalProcessed 个文件，新增 $totalAdded 张图片到数据库"
+            }
+        } catch (e: Exception) {
+            PluginMain.logger.error("重建数据库失败: ${e.message}")
+            "重建数据库失败: ${e.message}"
+        }
+    }
+    
+    /**
+     * 重建单个群聊的数据库
+     */
+    private suspend fun rebuildSingleGroup(groupId: Long): Pair<Int, Int> {
+        var processedCount = 0
+        var addedCount = 0
+        
+        val groupPath = PluginMain.resolveDataFile("LaiZhi/$groupId")
+        if (!groupPath.exists()) {
+            return Pair(0, 0)
+        }
+        
+        val galleryDirs = groupPath.listFiles { file -> file.isDirectory }
+        galleryDirs?.forEach { galleryDir ->
+            val galleryName = galleryDir.name
+            if (isPathSafe(galleryName)) {
+                val imageFiles = galleryDir.listFiles { file ->
+                    file.isFile && (file.extension.lowercase() in listOf("jpg", "jpeg", "png", "gif"))
+                }
+                
+                imageFiles?.forEach { imageFile ->
+                    try {
+                        processedCount++
+                        val md5 = getMD5(imageFile.readBytes())
+                        
+                        // 检查数据库中是否已存在
+                        val exists = transaction(db) {
+                            ImageFiles.selectAll()
+                                .where { 
+                                    (ImageFiles.md5 eq md5) and 
+                                    (ImageFiles.qq eq groupId.toString()) and 
+                                    (ImageFiles.about eq galleryName)
+                                }
+                                .firstOrNull() != null
+                        }
+                        
+                        if (!exists) {
+                            // 保存到数据库
+                            saveImageFromFile(groupId, galleryName, imageFile)
+                            addedCount++
+                        }
+                    } catch (e: Exception) {
+                        PluginMain.logger.error("处理文件 ${imageFile.name} 失败: ${e.message}")
                     }
                 }
             }
+        }
+        
+        return Pair(processedCount, addedCount)
+    }
+    
+    /**
+     * 从本地文件保存图片信息到数据库
+     */
+    private suspend fun saveImageFromFile(groupId: Long, galleryName: String, imageFile: File) {
+        val md5 = getMD5(imageFile.readBytes())
+        val fileType = getFileExtension(imageFile).removePrefix(".")
+        val relativePath = "LaiZhi/$groupId/$galleryName/"
+        
+        transaction(db) {
+            ImageFiles.insert {
+                it[id] = IdWorker().nextId()
+                it[this.md5] = md5
+                it[qq] = groupId.toString()
+                it[count] = 0L
+                it[about] = galleryName
+                it[type] = fileType
+                it[url] = relativePath
+            }
+        }
+        
+        // 更新内存映射
+        updateMapAfterInsert(groupId.toString(), galleryName)
+    }
+    /**
+     * 校验并清理数据库中的无效记录
+     * 1. 检查图库名称是否安全
+     * 2. 检查所有图片记录对应的物理文件是否存在
+     * @return 删除的记录数量
+     */
+    fun deleteUnsafeFiles(): Int {
+        var deletedCount = 0
+        return transaction {
+            // 检查图库名称是否安全
+            ImageFiles.selectAll().where { ImageFiles.about.like("%/%") }.forEach { result ->
+                val aboutValue = result[ImageFiles.about]
+                if (!isPathSafe(aboutValue)) {
+                    ImageFiles.deleteWhere { ImageFiles.about eq aboutValue }
+                    deletedCount++
+                    PluginMain.logger.info("删除不安全的图库名称记录: $aboutValue")
+                }
+            }
+            
+            // 检查所有图片记录对应的物理文件是否存在
+            ImageFiles.selectAll().forEach { result ->
+                val md5Value = result[ImageFiles.md5]
+                val qqValue = result[ImageFiles.qq]
+                val aboutValue = result[ImageFiles.about]
+                val typeValue = result[ImageFiles.type]
+                
+                val filePath = "LaiZhi/$qqValue/$aboutValue/$md5Value.$typeValue"
+                val file = resolveDataFile(filePath)
+                
+                if (!file.exists() || file.length() == 0L) {
+                    // 物理文件不存在或为空文件，删除数据库记录
+                    val id = result[ImageFiles.id]
+                    ImageFiles.deleteWhere { ImageFiles.id eq id }
+                    deletedCount++
+                    PluginMain.logger.info("删除无效图片记录: $filePath")
+                }
+            }
+            
+            // 更新内存中的数据映射
+            if (deletedCount > 0) {
+                PluginMain.DataMP = queryDataToMap()
+            }
+            
             deletedCount // 返回删除的数据量
         }
     }

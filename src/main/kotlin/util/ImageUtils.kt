@@ -19,6 +19,9 @@ import kotlin.random.Random
 class ImageUtils: Closeable {
     companion object
     {
+        // 用于存储每个群组的已使用索引，避免重复
+        private val usedIndicesMap = mutableMapOf<String, MutableSet<Int>>()
+        
         fun GetImage(group: Group, folderpath:String, picnum:Int ): ExternalResource? {
 
             try {
@@ -31,7 +34,7 @@ class ImageUtils: Closeable {
                     val rad = if(picnum!=-1){
                         picnum-1
                     } else {
-                        Random.nextInt(0,images.size+1)%images.size;
+                        Random.nextInt(0, images.size)
                     }
 
                     val randomImage = images[rad]
@@ -43,9 +46,43 @@ class ImageUtils: Closeable {
                 }
 
             }catch (e:Exception){
-                logger.error( "获取图片异常")
+                logger.error( "获取图片异常: ${e.message}")
             }
             return null
+        }
+        
+        /**
+         * 获取多张不重复的随机图片索引
+         */
+        fun getRandomIndices(totalCount: Int, requestCount: Int, groupId: String, galleryName: String): List<Int> {
+            if (requestCount >= totalCount) {
+                // 如果请求数量大于等于总数量，返回所有索引
+                return (0 until totalCount).toList()
+            }
+            
+            val key = "${groupId}_${galleryName}"
+            val usedIndices = usedIndicesMap.getOrPut(key) { mutableSetOf() }
+            
+            // 如果已使用的索引数量加上请求数量超过总数量，清空已使用索引
+            if (usedIndices.size + requestCount > totalCount) {
+                usedIndices.clear()
+            }
+            
+            val availableIndices = (0 until totalCount).filter { it !in usedIndices }
+            val selectedIndices = availableIndices.shuffled().take(requestCount)
+            
+            // 将选中的索引添加到已使用集合中
+            usedIndices.addAll(selectedIndices)
+            
+            return selectedIndices
+        }
+        
+        /**
+         * 清空指定群组和图库的已使用索引缓存
+         */
+        fun clearUsedIndices(groupId: String, galleryName: String) {
+            val key = "${groupId}_${galleryName}"
+            usedIndicesMap.remove(key)
         }
 
 

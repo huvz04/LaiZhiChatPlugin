@@ -7,7 +7,7 @@ plugins {
 }
 val kotlinVersion = "2.0.0"
 group = "LaiZhi.Chat.Repeater"
-version = "0.5.3"
+version = "0.5.4"
 val exposedVersion: String by project
 repositories {
     mavenCentral()

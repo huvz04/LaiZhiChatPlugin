@@ -35,5 +35,11 @@ internal object LzConfig : AutoSavePluginConfig("LaiZhiConfig"){
     @ValueDescription("抽取多次指令")
     var drawMultipleList:List<String> by value(listOf("抽"))
     @ValueDescription("抽取多次最大数量限制")
-    var maxDrawCount:Int by value(10)
+    var maxDrawCount:Int by value(20)
+    @ValueDescription("重建数据库指令")
+    var rebuildDatabaseList:List<String> by value(listOf("#重建数据库", "#扫描目录"))
+    @ValueDescription("关键字模式概率回复开关")
+    var enableProbabilityReply:Boolean by value(false)
+    @ValueDescription("关键字模式回复概率(0-100)")
+    var replyProbability:Int by value(50)
 }
